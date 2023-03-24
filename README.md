@@ -14,7 +14,7 @@ It is worth noting that this bypass is only possible if the server does not have
 
 ```
 Options:
- -d,  --domain		 Analyzing one target subdomain/domain (e.g example.com, https://example.com)
+  -d,  --domain		 Analyzing one target subdomain/domain (e.g example.com, https://example.com)
   -dL, --domain-list	 Analyzing multiple targets in a text file 
   -i,  --ip		 Parse DNS via real IP, bypass WAF (e.g 192.168.0.10)
   -iL, --ip-list	 Parse DNS via real IP, bypass WAF in a text file
@@ -23,7 +23,6 @@ Options:
   -h,  --help		 Help [Usage]
 
  Basic usage:
-
   ./zigwaf.sh -d example.com -i 192.168.0.10
   ./zigwaf.sh -d example.com -iL listips.txt
   ./zigwaf.sh -dL domainlist.txt -i 192.168.0.10
