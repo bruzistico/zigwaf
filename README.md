@@ -9,7 +9,7 @@ It is worth noting that this bypass is only possible if the server does not have
 
 ## Usage modes
 <p align="center">
-<img align="center" alt="mortomuitolouco" class="center" src="https://user-images.githubusercontent.com/90929569/227417422-a8e85932-6a38-4047-b7b4-27ae5825946d.png">
+<img align="center" alt="mortomuitolouco" class="center" src="https://user-images.githubusercontent.com/90929569/232559614-274ec1a1-05c2-4ee4-b27c-b88c2ffacfff.png">
 </p>
 
 ```
@@ -17,7 +17,8 @@ Options:
   -d,  --domain		 Analyzing one target subdomain/domain (e.g example.com, https://example.com)
   -dL, --domain-list	 Analyzing multiple targets in a text file 
   -i,  --ip		 Parse DNS via real IP, bypass WAF (e.g 192.168.0.10)
-  -iL, --ip-list	 Parse DNS via real IP, bypass WAF in a text file
+  -iL, --ip-list	 Parse DNS via real IP, bypass WAF in a text file![Captura de tela de 2023-04-17 13-45-20]
+  -c,  --cidr		 Parse DNS via IP Blocks [CIDR], bypass WAF (e.g. 192.168.0.0/24)
   -o,  --output		 Output (eg. output.txt)
   -v,  --verbose	 Verbose
   -h,  --help		 Help [Usage]
@@ -26,6 +27,7 @@ Options:
   ./zigwaf.sh -d example.com -i 192.168.0.10
   ./zigwaf.sh -d example.com -iL listips.txt
   ./zigwaf.sh -dL domainlist.txt -i 192.168.0.10
+  ./zigwaf.sh -dL domainlist.txt -c 192.168.0.0/24
   ./zigwaf.sh -dL domainlist.txt -iL listip.txt -v
   ./zigwaf.sh -dL domainlist.txt -iL listip.txt -v -o result.txt
 
@@ -63,7 +65,7 @@ Settings >> Network >> Connections >> Hostname resolution overrides
 ## To Do [Implementation]:
 
 - Add port options other than the defaults 80,443 [list via command and via file]
-- [CIDR] IP ranges and blocks via command line [Eg. 200.54.20.0/24, 200.54.20.10-15]
+- ~~- [CIDR] IP ranges and blocks via command line [Eg. 200.54.20.0/24, 200.54.20.10-15]~~
 - Direct queries from ASN
 - More file output options [output]
 
