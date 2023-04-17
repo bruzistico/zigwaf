@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #-Metadata----------------------------------------------------#
-#  Filename: zigwaf (v1.0)      (update: 2023-03-23)   				#
+#  Filename: zigwaf (v1.1)      (update: 2023-04-17)   				#
 #-Info--------------------------------------------------------#
 #  Identify WAF bypass via IP         						  					#
 #-Author(s)---------------------------------------------------#
@@ -20,7 +20,7 @@
 ### Variable Name and Version ------------------------------------------------------------------------
 
 APPNAME="zigwaf.sh"
-VERSION="1.0#dev"
+VERSION="1.1#dev"
 
 #### Colors Outputs -----------------------------------------------------------------------------------
 
@@ -73,16 +73,18 @@ goHelp() {
   echo -e "${PADDING}${SORANGE}$0${RESET} ${GREEN}-d${RESET} example.com ${GREEN}-i${RESET} 192.168.0.10"
   echo -e "${PADDING}${SORANGE}$0${RESET} ${GREEN}-d${RESET} example.com ${GREEN}-iL${RESET} listips.txt"
   echo -e "${PADDING}${SORANGE}$0${RESET} ${GREEN}-dL${RESET} domainlist.txt ${GREEN}-i${RESET} 192.168.0.10"
+  echo -e "${PADDING}${SORANGE}$0${RESET} ${GREEN}-dL${RESET} domainlist.txt ${GREEN}-c${RESET} 192.168.0.0/24"
   echo -e "${PADDING}${SORANGE}$0${RESET} ${GREEN}-dL${RESET} domainlist.txt ${GREEN}-iL${RESET} listip.txt ${GREEN}-v${RESET}"
   echo -e "${PADDING}${SORANGE}$0${RESET} ${GREEN}-dL${RESET} domainlist.txt ${GREEN}-iL${RESET} listip.txt ${GREEN}-v${RESET} ${GREEN}-o ${RESET}result.txt"
   echo -e ""
-  echo -e " ${RED}[INFO]${RESET} It is mandatory to inform domain targets [${GREEN}-d${RESET} or ${GREEN}-dL${RESET}] ${BOLD}${LPURPLE}and${RESET} IP targets [${GREEN}-i${RESET} or ${GREEN}-iL${RESET}]"
+  echo -e " ${RED}[INFO]${RESET} It is mandatory to inform domain targets [${GREEN}-d${RESET} or ${GREEN}-dL${RESET}] ${BOLD}${LPURPLE}and${RESET} IP targets [${GREEN}-i/-c${RESET} or ${GREEN}-iL${RESET}]"
   echo -e ""
   echo -e " ${BOLD}Options:${RESET}"
   echo -e "${PADDING}${BOLD}${GREEN}-d, ${RESET} --domain${DPADDING} Analyzing one target subdomain/domain (e.g example.com, https://example.com)"
   echo -e "${PADDING}${BOLD}${GREEN}-dL,${RESET} --domain-list\t Analyzing multiple targets in a text file "
   echo -e "${PADDING}${BOLD}${GREEN}-i, ${RESET} --ip${DPADDING} Parse DNS via real IP, bypass WAF (e.g 192.168.0.10)"
   echo -e "${PADDING}${BOLD}${GREEN}-iL,${RESET} --ip-list${RPADDING} Parse DNS via real IP, bypass WAF in a text file"
+  echo -e "${PADDING}${BOLD}${GREEN}-c, ${RESET} --cidr${DPADDING} Parse DNS via IP Blocks [CIDR], bypass WAF (e.g. 192.168.0.0/24)"
   echo -e "${PADDING}${BOLD}${GREEN}-o, ${RESET} --output${DPADDING} Output (eg. output.txt)"
   echo -e "${PADDING}${BOLD}${GREEN}-v, ${RESET} --verbose${RPADDING} Verbose"
   echo -e "${PADDING}${BOLD}${GREEN}-h, ${RESET} --help${DPADDING} Help [Usage]"
@@ -100,7 +102,7 @@ goHelp() {
 ##=======================================================================================================================
 
 checkArguments(){
-    options+=(-d --domain -dL -dL -i --ip -iL --ip-list -o --output)
+    options+=(-d --domain -dL -dL -i --ip -iL --ip-list -o --output -c --cidr)
     if [[ "${options[@]}" =~ "$2" ]]; then
             echo -e ""
             echo -e " The argument of \"${GREEN}$1${RESET}\" it can not be ${RED}\"$2\"${RESET}, please, ${SORANGE}specify a valid one${RESET}."
@@ -133,11 +135,17 @@ progress_bar(){
   	f1=$(grep -c "" ${file1})
   	f2=$(grep -c "" ${file2})
   	rows=$((($f1) * ($f2)))
+  elif [[ -n "${num_ips}" ]] && [[ "${cidrdouble}" == "" ]]; then
+  	rows="${num_ips}"
+  elif [[ -n "${num_ips}" ]] && [[ "${cidrdouble}" == true ]]; then
+  	f1=$(grep -c "" ${file1})
+  	rows=$((($f1) * ($num_ips)))
   else
   	rows=$(grep -c "" ${file})
   fi
+  
   clear_line="\\033[K"
-  bar_size="#######################################"
+  bar_size="■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■"
   max_bar=${#bar_size}
   let counter++
   percent=$((($counter) * 100 / $rows))
@@ -147,29 +155,51 @@ progress_bar(){
 	 	echo -ne "${msgbypass}"
 	fi
 
-	if [[ "${KEY_VERBOSE}" == true ]] || [[ "${KEY_DOMAIN}" == true && -n "${DOMAIN}" && "${KEY_LISTIP}" == "" ]]; then
+	if [[ "${KEY_VERBOSE}" == true ]]; then # || [[ "${KEY_DOMAIN}" == true && -n "${DOMAIN}" && "${KEY_LISTIP}" == "" && -z "${KEY_CIDR}" ]]; then
 		echo -ne "\\r${msg}${clear_line}\\n"
 	fi
 	
-	echo -ne "\\r Progress: [${bar_size:0:percBar}] $percent %$clear_line"
+	echo -ne "\\r Progress: ${bar_size:0:percBar} $percent %$clear_line"
+
+}
+
+
+CIDRgenerate(){
+
+		# Extract network address and subnet mask from CIDR
+		network_address=$(echo "$CIDR" | cut -d'/' -f1)
+		subnet_mask=$(echo "$CIDR" | cut -d'/' -f2)
+		
+		# Validate CIDR format
+		if ! [[ "$subnet_mask" =~ ^[0-9]+$ ]] || ((subnet_mask < 0 || subnet_mask > 32)); then
+		  echo "Error: Invalid CIDR block format. Subnet mask must be a number between 0 and 32."
+		  exit 1
+		fi
+		
+		# Convert network address to decimal
+		IFS='.' read -r -a octets <<< "$network_address"
+		network_dec=$(( (octets[0] * 256 ** 3) + (octets[1] * 256 ** 2) + (octets[2] * 256) + octets[3] ))
+		
+		# Calculate number of IP addresses in the CIDR block
+		num_ips=$((2 ** (32 - subnet_mask)))
 
 }
 
 Original(){
 
-		original="$(timeout --signal=9 2 curl -Lsk "{$DOMAIN}")"
+		original="$(timeout --signal=9 2 curl -Lsk "${DOMAIN}")"
 	
-		title_original="$(echo "{$original}" | grep "<title>" | awk -F "<title>" '{print $2}' | awk -F "</title>" '{print $1}' | awk -F "-" '{print $1}' | shasum | awk -F "-" '{print $1}') "
+		title_original="$(echo "${original}" | grep "<title>" | awk -F "<title>" '{print $2}' | awk -F "</title>" '{print $1}' | awk -F "-" '{print $1}' | shasum | awk -F "-" '{print $1}') "
 	
-		li_original="$(echo "{$original}" | grep "<li><a href=" | awk -F "://" '{print $2}' | awk -F "\"" '{print $1}' | shasum | awk -F "-" '{print $1}')"
+		li_original="$(echo "${original}" | grep "<li><a href=" | awk -F "://" '{print $2}' | awk -F "\"" '{print $1}' | shasum | awk -F "-" '{print $1}')"
 	
-		meta_original="$(echo "{$original}" | grep "<meta" | awk -F "<meta" '{print $2}' | awk -F ">\"" '{print $1}' | shasum | awk -F "-" '{print $1}')"
+		meta_original="$(echo "${original}" | grep "<meta" | awk -F "<meta" '{print $2}' | awk -F ">\"" '{print $1}' | shasum | awk -F "-" '{print $1}')"
 	
-		links_original="$(echo "{$original}" | grep "<link" | awk -F "<link" '{print $2}' | awk -F ">\"" '{print $1}' | shasum | awk -F "-" '{print $1}')"
+		links_original="$(echo "${original}" | grep "<link" | awk -F "<link" '{print $2}' | awk -F ">\"" '{print $1}' | shasum | awk -F "-" '{print $1}')"
 	
-		comment_original="$(echo "{$original}" | grep "<!--" | awk -F "<!--" '{print $2}' | awk -F "-->" '{print $1}' | shasum | awk -F "-" '{print $1}')"
+		comment_original="$(echo "${original}" | grep "<!--" | awk -F "<!--" '{print $2}' | awk -F "-->" '{print $1}' | shasum | awk -F "-" '{print $1}')"
 	
-		favicon_original="$(timeout --signal=9 2 curl -sLk "{$DOMAIN}/favicon.ico" | shasum | awk -F "-" '{print $1}')"
+		favicon_original="$(timeout --signal=9 2 curl -sLk "${DOMAIN}/favicon.ico" | shasum | awk -F "-" '{print $1}')"
 
 }
 
@@ -177,17 +207,17 @@ Bypass(){
 	
 		bypass="$(timeout --signal=9 2 curl -Lsk "${DOMAIN}" --resolve "${DOMAIN}":80:"${IP}" --resolve "${DOMAIN}":443:"${IP}")"
 	
-		title_bypass="$(echo "{$bypass}" | grep "<title>" | awk -F "<title>" '{print $2}' | awk -F "</title>" '{print $1}' | awk -F "-" '{print $1}' | shasum | awk -F "-" '{print $1}') "
+		title_bypass="$(echo "${bypass}" | grep "<title>" | awk -F "<title>" '{print $2}' | awk -F "</title>" '{print $1}' | awk -F "-" '{print $1}' | shasum | awk -F "-" '{print $1}') "
 
-		li_bypass="$(echo "{$bypass}" | grep "<li><a href=" | awk -F "://" '{print $2}' | awk -F "\"" '{print $1}' | shasum | awk -F "-" '{print $1}')"
+		li_bypass="$(echo "${bypass}" | grep "<li><a href=" | awk -F "://" '{print $2}' | awk -F "\"" '{print $1}' | shasum | awk -F "-" '{print $1}')"
 
-		meta_bypass="$(echo "{$bypass}" | grep "<meta" | awk -F "<meta" '{print $2}' | awk -F ">\"" '{print $1}' | shasum | awk -F "-" '{print $1}')"
+		meta_bypass="$(echo "${bypass}" | grep "<meta" | awk -F "<meta" '{print $2}' | awk -F ">\"" '{print $1}' | shasum | awk -F "-" '{print $1}')"
 	
-		links_bypass="$(echo "{$bypass}" | grep "<link" | awk -F "<link" '{print $2}' | awk -F ">\"" '{print $1}' | shasum | awk -F "-" '{print $1}')"
+		links_bypass="$(echo "${bypass}" | grep "<link" | awk -F "<link" '{print $2}' | awk -F ">\"" '{print $1}' | shasum | awk -F "-" '{print $1}')"
 	
-		comment_bypass="$(echo "{$bypass}" | grep "<!--" | awk -F "<!--" '{print $2}' | awk -F "-->" '{print $1}' | shasum | awk -F "-" '{print $1}')"
+		comment_bypass="$(echo "${bypass}" | grep "<!--" | awk -F "<!--" '{print $2}' | awk -F "-->" '{print $1}' | shasum | awk -F "-" '{print $1}')"
 	
-		favicon_bypass="$(timeout --signal=9 2 curl -sLk "{$DOMAIN}/favicon.ico" --resolve "${DOMAIN}":80:"${IP}" --resolve "${domain}":443:"${IP}" | shasum | awk -F "-" '{print $1}')"
+		favicon_bypass="$(timeout --signal=9 2 curl -sLk "${DOMAIN}/favicon.ico" --resolve "${DOMAIN}":80:"${IP}" --resolve "${DOMAIN}":443:"${IP}" | shasum | awk -F "-" '{print $1}')"
 
 }
 
@@ -212,12 +242,12 @@ Compare(){
 
 				if [[ "${KEY_OUTPUT}" == true ]]; then
 						echo "${DOMAIN} | ${IP}" >> "${OUTPUT}"
-				fi 
+				fi 	
 
 		else
-			
+				
 				if [[ "${KEY_VERBOSE}" == true ]] || [[ "${KEY_DOMAIN}" == true && -n "${DOMAIN}" && "${KEY_LISTIP}" == "" ]]; then
-	
+				
 					msg=" [$RED NO Bypass :( $RESET] $SBLUE"${DOMAIN}"$RESET $YELLOW>> $RESET"${IP}""
 
 					bypass=false
@@ -286,6 +316,14 @@ while [[ "${#}" -gt 0 ]]; do
  		  shift
  		  shift
  		  ;;
+ 		# CIDR
+ 		"-c" | "--cidr")
+		  checkArguments $1 $2
+ 		  CIDR="${2}"
+ 		  KEY_CIDR=true
+ 		  shift
+ 		  shift
+ 		  ;;
  		# Output 
  		"-o" | "--output")
 		  checkArguments $1 $2
@@ -336,7 +374,7 @@ if [[ "${KEY_DOMAIN}" == true ]] && [[ -n "${DOMAIN}" ]]; then
 		Bypass
 		Compare
 		msg_Done
-		exit 0
+		#exit 0
 	fi
 	#################################################################
 
@@ -356,8 +394,43 @@ if [[ "${KEY_DOMAIN}" == true ]] && [[ -n "${DOMAIN}" ]]; then
 	 			progress_bar
 	 		done
 	 	msg_Done
-		exit 0
+		#exit 0
 	fi
+	#####################################################################
+
+	##################################################################
+	## Case -d -c [List IP CIDR]------------------------------------
+	##################################################################
+
+	if [[ "${KEY_CIDR}" == true ]] && [[ -n "${CIDR}" ]]; then
+		
+		CIDRgenerate
+		goBanner
+		msg_subHeader
+		Original
+
+		# Generate IP addresses
+		for ((i = 0; i < num_ips; i++)); do	  
+		  # Add offset to network address
+		  ip_dec=$((network_dec + i))
+		
+		  # Convert decimal IP to octets
+		  octet1=$((ip_dec >> 24 & 255))
+		  octet2=$((ip_dec >> 16 & 255))
+		  octet3=$((ip_dec >> 8 & 255))
+		  octet4=$((ip_dec & 255))
+		
+		  # Assemble IP address
+		  IP="$octet1.$octet2.$octet3.$octet4"
+
+		  Bypass
+	 		Compare
+	 		progress_bar
+		done
+	 	msg_Done
+		#exit 0
+	fi
+
 	#####################################################################
 fi
 
@@ -381,7 +454,7 @@ if [[ "${KEY_LISTDOMAIN}" == true ]] && [[ -n "${LISTDOMAIN}" ]]; then
 				progress_bar
 			done
 		msg_Done
-		exit 0
+		#exit 0
 	fi
 	############################################################################
 
@@ -405,11 +478,48 @@ if [[ "${KEY_LISTDOMAIN}" == true ]] && [[ -n "${LISTDOMAIN}" ]]; then
 				done
 			done
 		msg_Done
-		exit 0
+		#exit 0
 	fi
 	############################################################################
+
+	#############################################################################
+	## Case -dL -c [List IP CIDR]-----------------------------------------------
+	##########################################################################
+	if [[ "${KEY_CIDR}" == true ]] && [[ -n "${CIDR}" ]]; then
+		cidrdouble=true
+		CIDRgenerate
+		goBanner
+		msg_subHeader
+			for line in $(cat ${LISTDOMAIN}); do	
+				DOMAIN="$(echo "$line" | sed 's/\r//g')"
+				Original
+				file1="${LISTDOMAIN}"
+				for ((i = 0; i < num_ips; i++)); do
+		 			# Add offset to network address
+		 			ip_dec=$((network_dec + i))
+			
+		 			# Convert decimal IP to octets
+		 			octet1=$((ip_dec >> 24 & 255))
+		 			octet2=$((ip_dec >> 16 & 255))
+		 			octet3=$((ip_dec >> 8 & 255))
+		 			octet4=$((ip_dec & 255))
+			
+		 			# Assemble IP address
+		 			IP="$octet1.$octet2.$octet3.$octet4"
+	
+		 			Bypass
+	 				Compare
+	 				progress_bar
+				done
+			done
+		msg_Done
+		#exit 0
+	fi
+	############################################################################
+#tput cnorm
 fi
 ##############
+tput cnorm
 tput cnorm
 ##----------------------------------------------------------------------------------------------------------------------
 ##
